@@ -1,29 +1,34 @@
-#include <iostream>
-#include <string>
 #include <fstream>
 #include <sstream>
-#include <vector>
-#include <algorithm>
+#include <iostream>
 #include <filesystem>
+
+#include <vector>
 #include <unordered_map>
-
-#include "../Matrix/src/Maft.hpp"
-
-using namespace Maft;
+#include <array>
 
 namespace obj_loader
 {
-	struct Material
+#ifdef OBJLOADER_USE_MAFT
+	#include "../Matrix/src/Maft.hpp"
+#else
+
+	struct vec2
 	{
-		std::string name;
-
-		Vector3f Ka;
-		Vector3f Kd;
-		Vector3f Ks;
-
-		float weighted;
-		float transparent;
+		float x;
+		float y;
+		vec2(float _x, float _y) : x(_x), y(_y) {}
 	};
+
+	struct vec3
+	{
+		float x;
+		float y;
+		float z;
+		vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+	};
+
+#endif
 
 	struct FaceVertex 
 	{
@@ -40,9 +45,37 @@ namespace obj_loader
 
 	struct Attrib
 	{
-		std::vector<Vector3f> vertices;
-		std::vector<Vector3f> normals;
-		std::vector<Vector2f> texcoords;
+#ifdef OBJLOADER_USE_MAFT
+		std::vector<Maft::vector3> vertices;
+		std::vector<Maft::vector3> normals;
+		
+		std::vector<Maft::vector2> texcoords;
+#else
+		std::vector<vec3> vertices;
+		std::vector<vec3> normals;
+
+		std::vector<vec2> texcoords;
+#endif
+	};
+
+	struct Material
+	{
+		std::string name;
+
+#ifdef OBJLOADER_USE_MAFT
+		Maft::Vector3f Ka;
+		Maft::Vector3f Kd;
+		Maft::Vector3f Ks;
+
+#endif
+
+		float Ka[3];
+		float Kd[3];
+		float Ks[3];
+
+		float opacity; 
+		float transparent;
+		float weighted;
 	};
 
 	struct Mesh
@@ -52,14 +85,15 @@ namespace obj_loader
 		std::unordered_map<std::string, Material> materials;
 	};
 
-	Material load_mtl(const std::string& path)
+	std::unordered_map<std::string, Material> parse_mtl_file(const std::string& path)
 	{
 		std::ifstream ifs(path);
 		if (!ifs.is_open())
-			throw std::runtime_error("Could not open file: " + path);
+			throw std::runtime_error("Could not open file at path: " + path);
 
-		std::string line;
+		std::unordered_map<std::string, Material> materials;
 		Material current;
+		std::string line;
 
 		while (std::getline(ifs, line))
 		{
@@ -72,26 +106,40 @@ namespace obj_loader
 
 			if (type == "newmtl")
 			{
+				if (!current.name.empty())
+					materials[current.name] = current;
+
 				current = Material{};
 				iss >> current.name;
 			}
+#ifdef OBJLOADER_USE_MAFT
 			else if (type == "Ka")
 				iss >> current.Ka.x >> current.Ka.y >> current.Ka.z;
 			else if (type == "Kd")
 				iss >> current.Kd.x >> current.Kd.y >> current.Kd.z;
 			else if (type == "Ks")
 				iss >> current.Ks.x >> current.Ks.y >> current.Ks.z;
+#else
+			else if (type == "Ka")
+				iss >> current.Ka[0] >> current.Ka[1] >> current.Ka[2];
+			else if (type == "Kd")
+				iss >> current.Kd[0] >> current.Kd[1] >> current.Kd[2];
+			else if (type == "Ks")
+				iss >> current.Ks[0] >> current.Ks[1] >> current.Ks[2];
+#endif
 			else if (type == "d")
-				iss >> current.transparent;
-			else if (type == "Ns") 
+				iss >> current.opacity;
+			else if (type == "Ns")
 				iss >> current.weighted;
 		}
 
-		return current;
+		if (!current.name.empty())
+			materials[current.name] = current;
+
+		return materials;
 	}
 
-
-	Mesh parse(const std::string& path)
+	Mesh parse_obj_file(const std::string& path)
 	{
 		std::ifstream ifstream(path);
 		if (!ifstream.is_open())
@@ -116,21 +164,18 @@ namespace obj_loader
 				float x, y, z;
 				iss >> x >> y >> z;
 				mesh.attrib.vertices.emplace_back(x, y, z);
-				std::cout << "v " << mesh.attrib.vertices.back() << "\n";
 			}
 			else if (type == "vt")
 			{
 				float x, y;
 				iss >> x >> y;
 				mesh.attrib.texcoords.emplace_back(x, y);
-				std::cout << "vt " << mesh.attrib.texcoords.back() << "\n";
 			}
 			else if (type == "vn")
 			{
 				float x, y, z;
 				iss >> x >> y >> z;
 				mesh.attrib.normals.emplace_back(x, y, z);
-				std::cout << "vn " << mesh.attrib.normals.back() << "\n";
 			}
 			else if (type  == "f") 
 			{
@@ -169,17 +214,7 @@ namespace obj_loader
 
 					face.push_back(fv);
 				}
-
 				currentShape.faces.push_back(face);
-
-				std::cout << "f ";
-				for (auto &fv : face) 
-				{
-					std::cout << "(" << fv.vertex_index 
-							<< "," << fv.textcoord_index 
-							<< "," << fv.normal_index << ") ";
-				}
-				std::cout << "\n";
 			}
 			else if(type == "mtllib")
 			{
@@ -189,21 +224,21 @@ namespace obj_loader
 				std::filesystem::path objPath = path;
 				std::filesystem::path mtlPath = objPath.parent_path() / mtlFile;
 
-				auto loaded = load_mtl(mtlPath.string());
-				mesh.materials[loaded.name] = loaded;
-				std::cout << "material name " << loaded.name << "\n";
+				auto loaded = parse_mtl_file(mtlPath.string());
+				mesh.materials.insert(loaded.begin(), loaded.end());
 			}
 			else if (type == "usemtl")
 			{
 				std::string matName;
 				iss >> matName;
-    			currentShape.material_name = matName;
+				currentShape.material_name = matName;
 			}
 		}
 
 		if (!currentShape.faces.empty())
-    		mesh.shapes.push_back(currentShape);
+			mesh.shapes.push_back(currentShape);
 
 		return mesh;
 	}
+
 }

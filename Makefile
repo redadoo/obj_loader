@@ -7,7 +7,7 @@ CXXFLAGS    := -std=c++17 -O3 -Wall -Wextra -Werror
 LDFLAGS     := -lraylib -ldl -lm -lpthread -lGL -lrt -lX11
 
 # Directories
-SRCDIR      := test
+SRCDIR      := src
 OBJDIR      := .obj
 INCDIRS     := test src 
 

@@ -222,7 +222,7 @@ namespace obj_loader
 				iss >> mtlFile;
 
 				std::filesystem::path objPath = path;
-				std::filesystem::path mtlPath = objPath.parent_path() / mtlFile;
+				std::filesystem::path mtlPath = "materials/" + mtlFile;
 
 				auto loaded = parse_mtl_file(mtlPath.string());
 				mesh.materials.insert(loaded.begin(), loaded.end());
